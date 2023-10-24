@@ -172,8 +172,12 @@ class AfCleverPointDeliveryStation extends ObjectModel
                 }
                 // Save extra vars
                 $cp_delivery_station->ExtraVars = Tools::jsonEncode($ExtraVars);
-
-                return $cp_delivery_station->save();
+                try {
+                    $cp_delivery_station->save();
+                    return true;
+                } catch (Exception $e) {
+                    $errors[] = $e->getMessage();
+                }
             }
         } catch (Exception $e) {
             $errors[] = $e->getMessage();

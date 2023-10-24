@@ -14,9 +14,6 @@
  */
 class AfCleverPointValidationModuleFrontController extends ModuleFrontController
 {
-    /**
-     * {@inheritdoc}
-     */
     public $ssl = true;
 
     /**
@@ -24,9 +21,6 @@ class AfCleverPointValidationModuleFrontController extends ModuleFrontController
      */
     public $module;
 
-    /**
-     * {@inheritdoc}
-     */
     public function postProcess()
     {
         if (false === $this->checkIfContextIsValid() || false === $this->checkIfPaymentOptionIsAvailable()) {

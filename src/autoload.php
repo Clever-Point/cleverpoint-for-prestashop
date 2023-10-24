@@ -14,7 +14,8 @@ if (!defined('_PS_VERSION_')) {
 }
 
 $folders = [
-    __DIR__ . '/Api/*.php'
+    __DIR__ . '/Api/*.php',
+    __DIR__ . '/Override/*.php'
 ];
 
 foreach ($folders as $folder) {

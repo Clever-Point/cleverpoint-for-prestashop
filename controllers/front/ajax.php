@@ -1,13 +1,13 @@
 <?php
 /**
- * 2019-2020 Afternet
+ * Afternet
  *
  * NOTICE OF LICENSE
  *
  * This source file is subject to the Academic Free License (AFL 3.0)
  *
  * @author    Afternet <info@afternet.gr>
- * @copyright 2019-2020 Afternet
+ * @copyright Afternet
  * @license   http://opensource.org/licenses/afl-3.0.php  Academic Free License (AFL 3.0)
  */
 
@@ -143,6 +143,7 @@ class AfCleverPointAjaxModuleFrontController extends ModuleFrontController
         // In case you serialize form from ajax
         $point = Tools::getValue('point');
         $id_cart = (int)Tools::getValue('id_cart');
+
         if (!empty($id_cart) && $id_cart == $this->context->cart->id) {
             if (!empty($point) && is_array($point)) {
                 // Check locker's required fields
@@ -159,7 +160,7 @@ class AfCleverPointAjaxModuleFrontController extends ModuleFrontController
                 $result = array_diff($required_fields, array_keys($point));
                 if (empty($result)) {
                     // Update Delivery Station information DB first
-                    if (AfCleverPointDeliveryStation::updateDeliveryStationData($point)) {
+                    if (AfCleverPointDeliveryStation::updateDeliveryStationData($point, $this->_ajax_errors)) {
                         // Get station id
                         $sql =
                             sprintf(
@@ -420,7 +421,7 @@ class AfCleverPointAjaxModuleFrontController extends ModuleFrontController
 
             // Service cost formatted
             $this->_data['service_cost_html'] =
-                Tools::getContextLocale($this->context)->formatPrice(
+                $this->context->getCurrentLocale()->formatPrice(
                     $cp_delivery_request->service_cost,
                     $this->context->currency->iso_code
                 );
@@ -429,7 +430,7 @@ class AfCleverPointAjaxModuleFrontController extends ModuleFrontController
                     $this->context->cart->getOrderTotal(true, Cart::BOTH);
 
             $this->_data['cart_total_with_service_formatted'] =
-                Tools::getContextLocale($this->context)->formatPrice(
+                $this->context->getCurrentLocale()->formatPrice(
                     $cart_total,
                     $this->context->currency->iso_code
                 );

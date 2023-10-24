@@ -18,6 +18,7 @@ require_once('classes/AfCleverPointDeliveryStation.php');
 require_once('src/autoload.php');
 
 use CleverPoint\Api;
+use CleverPoint\Override;
 
 class AfCleverPoint extends PaymentModule
 {
@@ -26,7 +27,7 @@ class AfCleverPoint extends PaymentModule
         $this->name = 'afcleverpoint';
         $this->tab = 'payments_gateways';
         $this->tabClass = 'AdminAfCleverPoint';
-        $this->version = '1.0.0';
+        $this->version = '1.0.2';
         $this->author = 'Afternet';
         $this->need_instance = 1;
         $this->identifier = 'afcleverpoint';
@@ -67,7 +68,6 @@ class AfCleverPoint extends PaymentModule
             !$this->registerHook('actionGetExtraMailTemplateVars') ||
             !$this->registerHook('actionValidateOrder') ||
             !$this->registerHook('actionCarrierProcess') ||
-            !$this->registerHook('actionCleverPointCartGetPackageShippingCost') ||
             !$this->registerHook('actionCleverPointCartGetOrderTotal') ||
             !$this->registerHook('actionCleverPointOverrideCod') ||
             !$this->registerHook('displayPaymentReturn') ||
@@ -76,8 +76,11 @@ class AfCleverPoint extends PaymentModule
             return false;
         }
 
-        $sql_file = dirname(__FILE__).'/install/install.sql';
-        if (!$this->loadSQLFile($sql_file)) {
+        if (!$this->installDbTables()) {
+            return false;
+        }
+
+        if (!$this->installOverrides()) {
             return false;
         }
 
@@ -96,6 +99,10 @@ class AfCleverPoint extends PaymentModule
     public function uninstall()
     {
         if (!$this->uninstallTab()) {
+            return false;
+        }
+
+        if (!$this->uninstallOverrides()) {
             return false;
         }
 
@@ -127,6 +134,73 @@ class AfCleverPoint extends PaymentModule
         }
 
         return $result;
+    }
+
+    /**
+     * Install necessary tables
+     * @return bool
+     */
+    public function installDbTables()
+    {
+        $sql = "CREATE TABLE IF NOT EXISTS `"._DB_PREFIX_."af_cleverpoint_delivery_request` (
+                    `id_cleverpoint_delivery_request` int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    `id_cart` int(11) DEFAULT 0,
+                    `id_address_delivery` int(11) DEFAULT 0,
+                    `previous_id_address_delivery` int(11) DEFAULT 0,
+                    `id_order` int(11) DEFAULT 0,
+                    `id_cleverpoint_delivery_station` int(11) DEFAULT 0,
+                    `is_cod` int(1) NOT NULL DEFAULT 0,
+                    `shipping_cost` decimal(20,6) DEFAULT 0.000000,
+                    `service_cost` decimal(20,6) DEFAULT 0.000000,
+                    `delivered` int(1) NOT NULL DEFAULT 0,
+                    `deliver_order_with_cp` int(1) NOT NULL DEFAULT 0,
+                    `ShipmentMasterId` varchar(100) DEFAULT NULL,
+                    `ExternalCarrierId` varchar(100) DEFAULT NULL,
+                    `ExternalCarrierName` varchar(50) DEFAULT NULL,
+                    `ShipmentAwb` varchar(100) DEFAULT NULL,
+                    `PickupComments` varchar(255) DEFAULT NULL,
+                    `parcels` INT (11) DEFAULT 1,
+                    `json_response` TEXT DEFAULT NULL,
+                    `date_add` datetime NOT NULL,
+                    `date_upd` datetime NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8";
+
+        if (!Db::getInstance()->execute($sql)) {
+            return false;
+        }
+
+        $sql = "CREATE TABLE IF NOT EXISTS `"._DB_PREFIX_."af_cleverpoint_delivery_station` (
+                `id_cleverpoint_delivery_station` int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                `StationId` varchar(50) DEFAULT NULL,
+                `Prefix` varchar(50) DEFAULT NULL,
+                `Code` varchar(50) DEFAULT NULL,
+                `Name` varchar(255) NOT NULL,
+                `Category` varchar(100) DEFAULT NULL,
+                `ShortName` varchar(50) DEFAULT NULL,
+                `AddressLine1` varchar(255) NOT NULL,
+                `AddressLine2` varchar(255) DEFAULT NULL,
+                `City` varchar(255) DEFAULT NULL,
+                `Perfecture` varchar(50) DEFAULT NULL,
+                `ZipCode` varchar(12) NOT NULL,
+                `Phones` varchar(255) DEFAULT NULL,
+                `Emails` varchar(255) DEFAULT NULL,
+                `MaxDimension` decimal(20,6) DEFAULT NULL,
+                `MaxWeight` decimal(20,6) DEFAULT NULL,
+                `Schedule` varchar(255) DEFAULT NULL,
+                `WorkHoursFormattedWithDaysV2` varchar(255) DEFAULT NULL,
+                `ExtraVars` text DEFAULT NULL,
+                `IsOperationalForCOD` INT(1) NOT NULL DEFAULT 1,
+                `Lat` decimal(13,8) DEFAULT NULL,
+                `Lng` decimal(13,8) DEFAULT NULL,
+                `date_add` datetime NOT NULL,
+                `date_upd` datetime NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8";
+
+        if (!Db::getInstance()->execute($sql)) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -1637,8 +1711,10 @@ class AfCleverPoint extends PaymentModule
                 $address_clever_point->postcode = $point['ZipCode'];
                 $address_clever_point->id_state = $id_states_countries['id_state_attika'];
                 $address_clever_point->other = $point['Name'].' '.$address_delivery->other;
-                if (Address::dniRequired($id_country_gr)) {
-                    $address_clever_point->dni = $address_delivery->dni;
+                if (version_compare(_PS_VERSION_, '1.7.7', '>=')) {
+                    if (Address::dniRequired($id_country_gr)) {
+                        $address_clever_point->dni = $address_delivery->dni;
+                    }
                 }
             }
 
@@ -1652,7 +1728,7 @@ class AfCleverPoint extends PaymentModule
                     $errors[] = $this->l('Unable to save address data please try again later.');
                 }
             } catch (Exception $e) {
-                $errors[] = $this->l('Service is unavailable please try again later.').$e->translate();
+                $errors[] = $this->l('Service is unavailable please try again later.').$e->getMessage();
             }
 
         } else {
@@ -1672,6 +1748,48 @@ class AfCleverPoint extends PaymentModule
     {
         if (version_compare(_PS_VERSION_, '1.7.7', '>=')) {
             return;
+        }
+
+        $id_order = $params['id_order'];
+        if ($this->isCleverPointOrder(null, $id_order)) {
+
+            $cp_delivery_request = AfCleverPointDeliveryRequest::getObject([
+                'id_order' => $id_order,
+            ]);
+
+            $cp_delivery_station = new AfCleverPointDeliveryStation(
+                $cp_delivery_request->id_cleverpoint_delivery_station
+            );
+            $order = new Order($id_order);
+
+            // PrintVoucher URL
+            $print_url = null;
+            $print_hash = null;
+            if (!empty($cp_delivery_request->ShipmentMasterId)) {
+                $print_hash = $this->generateHash($cp_delivery_request->ShipmentAwb);
+                $print_url = sprintf(
+                    '%smodules/%s/PrintVoucher.php',
+                    Tools::getHttpHost(true).__PS_BASE_URI__,
+                    $this->name
+                );
+            }
+            $this->context->smarty->assign(
+                'tpl_vars',
+                [
+                    'id_order' => $id_order,
+                    'cp_carriers' => $this->getCleverPointCarriers(),
+                    'cp_delivery_request' => $cp_delivery_request,
+                    'cp_delivery_station' => $cp_delivery_station,
+                    'order_total_weight' => $order->getTotalWeight(),
+                    'ShipmentAwb' =>
+                        (!empty($cp_delivery_request->ShipmentAwb) ?
+                            $cp_delivery_request->ShipmentAwb : $order->getWsShippingNumber()
+                        ),
+                    'print_url' => $print_url,
+                    'print_hash' => $print_hash,
+                    'afcp_voucher_management' => Configuration::get('AFCP_VOUCHER_MANAGEMENT')
+                ]
+            );
         }
 
         return $this->context->smarty->fetch(
@@ -1825,11 +1943,11 @@ class AfCleverPoint extends PaymentModule
                 !empty($cp_delivery_request->id_cleverpoint_delivery_station)
             ) {
 
-                $shipping_cost_formatted = Tools::getContextLocale($this->context)->formatPrice(
+                $shipping_cost_formatted = $this->context->getCurrentLocale()->formatPrice(
                     $cp_delivery_request->shipping_cost,
                     $this->context->currency->iso_code
                 );
-                $service_cost_formatted = Tools::getContextLocale($this->context)->formatPrice(
+                $service_cost_formatted = $this->context->getCurrentLocale()->formatPrice(
                     $cp_delivery_request->service_cost,
                     $this->context->currency->iso_code
                 );
@@ -1898,21 +2016,24 @@ class AfCleverPoint extends PaymentModule
 
         $embed_scripts = false;
         $current_controller = null;
-        if ($this->context->controller->controller_name == 'AdminOrders') {
 
-            $current_controller = 'AdminOrders';
-
-            global $kernel;
-
-            $request = $kernel->getContainer()->get('request_stack')->getCurrentRequest();
-            if (!isset($request->attributes)) {
-                return;
-            }
-
-            $id_order = (int)$request->attributes->get('orderId');
-
-            if (!empty($id_order)) {
+        if (version_compare(_PS_VERSION_, '1.7.7.0', '<')) {
+            if (Tools::getValue('controller') == 'AdminOrders' && Tools::getValue('id_order') > 0) {
+                $id_order = Tools::getValue('id_order');
                 $embed_scripts = true;
+            }
+        } else {
+            if ($this->context->controller->controller_name == 'AdminOrders') {
+                $current_controller = 'AdminOrders';
+                global $kernel;
+                $request = $kernel->getContainer()->get('request_stack')->getCurrentRequest();
+                if (!isset($request->attributes)) {
+                    return;
+                }
+                $id_order = (int)$request->attributes->get('orderId');
+                if (!empty($id_order)) {
+                    $embed_scripts = true;
+                }
             }
         }
 
@@ -2122,11 +2243,11 @@ class AfCleverPoint extends PaymentModule
         }
 
         // Format prices
-        $shipping_cost_formatted = Tools::getContextLocale($this->context)->formatPrice(
+        $shipping_cost_formatted = $this->context->getCurrentLocale()->formatPrice(
             $delivery_request->shipping_cost,
             $this->context->currency->iso_code
         );
-        $service_cost_formatted = Tools::getContextLocale($this->context)->formatPrice(
+        $service_cost_formatted = $this->context->getCurrentLocale()->formatPrice(
             $delivery_request->service_cost,
             $this->context->currency->iso_code
         );
@@ -2135,6 +2256,7 @@ class AfCleverPoint extends PaymentModule
                 WHERE `id_carrier` IN (".implode(',', $options['AFCP_CARRIER_IDS']).") AND
                 `active` = 1 AND `deleted` = 0
                 ORDER BY `position`";
+
         $carrier_names = Db::getInstance()->executeS($sql);
 
         $this->context->smarty->assign(
@@ -2252,11 +2374,11 @@ class AfCleverPoint extends PaymentModule
 
                 if (Validate::isLoadedObject($cp_delivery_request)) {
 
-                    $shipping_cost_formatted = Tools::getContextLocale($this->context)->formatPrice(
+                    $shipping_cost_formatted = $this->context->getCurrentLocale()->formatPrice(
                         $cp_delivery_request->shipping_cost,
                         $this->context->currency->iso_code
                     );
-                    $service_cost_formatted = Tools::getContextLocale($this->context)->formatPrice(
+                    $service_cost_formatted = $this->context->getCurrentLocale()->formatPrice(
                         $cp_delivery_request->service_cost,
                         $this->context->currency->iso_code
                     );
@@ -2299,6 +2421,7 @@ class AfCleverPoint extends PaymentModule
                         $params['extra_template_vars']['{delivery_block_txt}'] =
                             AddressFormat::generateAddress(
                                 $delivery_address,
+                                [],
                                 AddressFormat::FORMAT_NEW_LINE
                             );
 
@@ -2378,16 +2501,6 @@ class AfCleverPoint extends PaymentModule
         }
 
         return true;
-    }
-
-    /**
-     * Add service cost to shipping
-     *
-     * @param $params
-     * @return void
-     */
-    public function hookActionCleverPointCartGetPackageShippingCost(&$params)
-    {
     }
 
     /**
@@ -2580,5 +2693,37 @@ class AfCleverPoint extends PaymentModule
         }
 
         return false;
+    }
+
+    /**
+     * Install module's overrides
+     *
+     * @return bool
+     */
+    public function installOverrides()
+    {
+        try {
+            $io = new CleverPoint\Override\InstallOverride($this);
+            $io->processOverride('addOverride');
+            return true;
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Uninstall overrides
+     *
+     * @return bool
+     */
+    public function uninstallOverrides()
+    {
+        try {
+            $io = new CleverPoint\Override\InstallOverride($this);
+            $io->processOverride('removeOverride');
+            return true;
+        } catch (Exception $e) {
+            return false;
+        }
     }
 }
