@@ -455,7 +455,7 @@ class AdminAfCleverPointController extends ModuleAdminController
             if (
                 Configuration::updateValue(
                     'AFCP_CARRIER_MAPPING',
-                    Tools::jsonEncode($data['carrier'])
+                    AfCleverPoint::jsonEncode($data['carrier'])
                 )
             ) {
 

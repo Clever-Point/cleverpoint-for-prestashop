@@ -27,11 +27,11 @@ class AfCleverPoint extends PaymentModule
         $this->name = 'afcleverpoint';
         $this->tab = 'payments_gateways';
         $this->tabClass = 'AdminAfCleverPoint';
-        $this->version = '1.0.2';
+        $this->version = '1.0.4';
         $this->author = 'Afternet';
         $this->need_instance = 1;
         $this->identifier = 'afcleverpoint';
-        $this->ps_versions_compliancy = array('min' => '1.7', 'max' => '1.7.99.99');
+        $this->ps_versions_compliancy = array('min' => '1.7', 'max' => '8.1.99');
         $this->controllers = ['payment', 'validation'];
         $this->bootstrap = true;
 
@@ -272,16 +272,16 @@ class AfCleverPoint extends PaymentModule
                 ['position' => 'bottom', 'priority' => 150]
             );
 
-            if (Configuration::get('AFCP_MODE')) {
+            if (Configuration::get('AFCP_SANDBOX')) {
                 $this->context->controller->registerJavascript(
                     'modules'.$this->name.'-script-external',
-                    'https://platform.cleverpoint.gr/portal/content/clevermap_v2/script/cleverpoint-map.js',
+                    'https://test.cleverpoint.gr/portal/content/clevermap_v2/script/cleverpoint-map.js',
                     ['position' => 'bottom', 'priority' => 150, 'server' => 'remote']
                 );
             } else {
                 $this->context->controller->registerJavascript(
                     'modules'.$this->name.'-script-external',
-                    'https://test.cleverpoint.gr/portal/content/clevermap_v2/script/cleverpoint-map.js',
+                    'https://platform.cleverpoint.gr/portal/content/clevermap_v2/script/cleverpoint-map.js',
                     ['position' => 'bottom', 'priority' => 150, 'server' => 'remote']
                 );
             }
@@ -375,7 +375,7 @@ class AfCleverPoint extends PaymentModule
             [
                 'ps_carriers' => $ps_carriers,
                 'cp_carriers' => $this->getCleverPointCarriers(),
-                'carrier_mapping' => Tools::jsonDecode(
+                'carrier_mapping' => AfCleverPoint::jsonDecode(
                     Configuration::get(
                         'AFCP_CARRIER_MAPPING'
                     ),
@@ -2305,7 +2305,7 @@ class AfCleverPoint extends PaymentModule
         $sql = "SELECT `id_reference` FROM `"._DB_PREFIX_."carrier` WHERE `id_carrier` = ".$id_carrier;
         $id_reference = Db::getInstance()->getValue($sql);
 
-        $AFCP_CARRIER_MAPPING = Tools::jsonDecode(Configuration::get('AFCP_CARRIER_MAPPING'), true);
+        $AFCP_CARRIER_MAPPING = AfCleverPoint::jsonDecode(Configuration::get('AFCP_CARRIER_MAPPING'), true);
         if (!empty($AFCP_CARRIER_MAPPING) && !empty($id_reference)) {
             $carrierId = $AFCP_CARRIER_MAPPING[$id_reference];
 
@@ -2724,6 +2724,42 @@ class AfCleverPoint extends PaymentModule
             return true;
         } catch (Exception $e) {
             return false;
+        }
+    }
+
+    /**
+     * jsonDecode convert json string to php array / object
+     *
+     * @param $data
+     * @param $assoc
+     * @param $depth
+     * @param $options
+     * @return array
+     */
+    public static function jsonDecode($data, $assoc = false, $depth = 512, $options = 0)
+    {
+        if (method_exists('Tools', 'jsonDecode')) {
+            return Tools::jsonDecode($data, $assoc, $depth, $options);
+        } else {
+            return json_decode($data, $assoc, $depth, $options);
+        }
+    }
+
+    /**
+     * Convert an array to json string
+     *
+     * @param array $data
+     * @param int $depth
+     * @param int $options
+     *
+     * @return string json
+     */
+    public static function jsonEncode($data, $options = 0, $depth = 512)
+    {
+        if (method_exists('Tools', 'jsonEncode')) {
+            return Tools::jsonEncode($data, $options, $depth);
+        } else {
+            return json_encode($data, $options, $depth);
         }
     }
 }
