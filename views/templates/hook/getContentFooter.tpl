@@ -52,6 +52,15 @@
                     {/if}
                 </div>
             </div>
+            <div class="form-group">
+                <label class="control-label col-lg-3">{l s='Refresh carriers list' mod='afcleverpoint'}</label>
+                <div class="col-lg-9">
+                    <a href="#" class="btn btn-primary afcp-ajax" id="admin-clever-point-refresh-carriers">{l s='Refresh' mod='afcleverpoint'}</a>
+                    <p class="help-block">
+                        {l s='Refresh Clever Point carrier list.' mod='afcleverpoint'}
+                    </p>
+                </div>
+            </div>
         </div><!-- /.form-wrapper -->
 
         <div class="panel-footer">
@@ -63,3 +72,27 @@
         </div>
     </div>
 </form>
+{if ($tpl_vars.opc_is_enabled)}
+<form class="defaultForm form-horizontal" id="af_cleverpoint_opc_form">
+    <div class="panel" id="fieldset_3_3">
+        <div class="panel-heading">
+            <i class="icon-cogs"></i> {l s='One page checkout for Prestashop' mod='afcleverpoint'}
+        </div>
+        <div class="form-wrapper">
+            <div class="form-group">
+                <label class="control-label col-lg-3">{l s='Version compatibility' mod='afcleverpoint'}</label>
+                <div class="col-lg-9">
+                    {if ($tpl_vars.opc_compatibility)}
+                        {l s='Module is tested with the following versions:' mod='afcleverpoint'} <code>{$tpl_vars.opc_compatibility.min}</code> {l s='to' mod='afcleverpoint'} <code>{$tpl_vars.opc_compatibility.max}</code>
+                    {/if}
+                    <p class="help-block">
+                        {l s='Make sure you are have a compatible version of module' mod='afcleverpoint'} <a href="https://addons.prestashop.com/en/express-checkout-process/6841-one-page-checkout-for-prestashop.html" target="_blank">One page checkout for Prestashop</a>
+                    </p>
+                </div>
+            </div>
+        </div><!-- /.form-wrapper -->
+        <div class="panel-footer">
+        </div>
+    </div>
+</form>
+{/if}

@@ -27,11 +27,11 @@ class AfCleverPoint extends PaymentModule
         $this->name = 'afcleverpoint';
         $this->tab = 'payments_gateways';
         $this->tabClass = 'AdminAfCleverPoint';
-        $this->version = '1.0.4';
+        $this->version = '2.0.0';
         $this->author = 'Afternet';
         $this->need_instance = 1;
         $this->identifier = 'afcleverpoint';
-        $this->ps_versions_compliancy = array('min' => '1.7', 'max' => '8.1.99');
+        $this->ps_versions_compliancy = array('min' => '1.7', 'max' => _PS_VERSION_);
         $this->controllers = ['payment', 'validation'];
         $this->bootstrap = true;
 
@@ -73,18 +73,22 @@ class AfCleverPoint extends PaymentModule
             !$this->registerHook('displayPaymentReturn') ||
             !$this->registerHook('paymentOptions')
         ) {
+            $this->_errors[] = $this->l('Unable to register hooks');
             return false;
         }
 
         if (!$this->installDbTables()) {
+            $this->_errors[] = $this->l('Unable to create tables');
             return false;
         }
 
         if (!$this->installOverrides()) {
+            $this->_errors[] = $this->l('Unable to add overrides');
             return false;
         }
 
         if (!$this->installTab()) {
+            $this->_errors[] = $this->l('Unable to create tabs');
             return false;
         }
 
@@ -99,14 +103,17 @@ class AfCleverPoint extends PaymentModule
     public function uninstall()
     {
         if (!$this->uninstallTab()) {
+            $this->_errors[] = $this->l('Unable to uninstall tabs');
             return false;
         }
 
         if (!$this->uninstallOverrides()) {
+            $this->_errors[] = $this->l('Unable to uninstall overrides');
             return false;
         }
 
         if (!parent::uninstall()) {
+            $this->_errors[] = $this->l('Unable to uninstall');
             return false;
         }
 
@@ -209,19 +216,21 @@ class AfCleverPoint extends PaymentModule
      */
     public function installTab()
     {
-        // BoxNow admin tab
+        // Cleverpoint admin tab
         $new_tab = new Tab();
         $new_tab->active = 1;
         $new_tab->class_name = $this->tabClass;
         $new_tab->id_parent = Tab::getIdFromClassName('AdminParentOrders');
         $new_tab->module = $this->name;
         $new_tab->name[(int)(Configuration::get('PS_LANG_DEFAULT'))] = $this->l('Clever Point Orders');
-        $new_tab->add();
-        if (!$new_tab->id) {
-            return false;
+        try {
+            $new_tab->add();
+            return true;
+        } catch (Exception $e) {
+            $this->_errors[] = $e->getMessage();
         }
 
-        return true;
+        return false;
     }
 
     /**
@@ -238,7 +247,14 @@ class AfCleverPoint extends PaymentModule
         $tab = new Tab((int)$id_tab);
 
         // Delete it
-        return $tab->delete();
+        try {
+            $tab->delete();
+            return true;
+        } catch (Exception $e) {
+            $this->_errors[] = $e->getMessage();
+        }
+
+        return false;
     }
 
     /**
@@ -251,6 +267,7 @@ class AfCleverPoint extends PaymentModule
         $customer_address = null;
 
         if ($this->context->controller->php_self == 'order' && $this->isMethodAvailableForCart()) {
+
             if (!empty($this->context->cart->id_address_delivery)) {
                 $delivery_address = new Address((int)$this->context->cart->id_address_delivery);
                 $customer_address = isset($delivery_address->address1) ? $delivery_address->address1 : '';
@@ -262,14 +279,25 @@ class AfCleverPoint extends PaymentModule
                 }
             }
 
-            $this->context->controller->registerStylesheet(
-                $this->name, 'modules/'.$this->name.'/views/css/front.css', ['priority' => 150]
-            );
+            // Onepagecheckout module
+            $afcp_opc_enabled = $this->tcIsModuleEnabled();
+
+            if ($afcp_opc_enabled) {
+                $afcp_checkout_btn_selector = 'button#confirm_order';
+                // Load thecheckout assets
+                $this->tcLoadAssetsFront();
+            } else {
+                $afcp_checkout_btn_selector = 'form#js-delivery button[name="confirmDeliveryOption"]';
+                $this->context->controller->registerStylesheet(
+                    $this->name, 'modules/'.$this->name.'/views/css/front.css',
+                    ['priority' => 150, 'version' => $this->version]
+                );
+            }
 
             $this->context->controller->registerJavascript(
                 'modules'.$this->name.'-script',
                 'modules/'.$this->name.'/views/js/clevermap.js',
-                ['position' => 'bottom', 'priority' => 150]
+                ['position' => 'bottom', 'priority' => 10, 'version' => $this->version]
             );
 
             if (Configuration::get('AFCP_SANDBOX')) {
@@ -291,8 +319,18 @@ class AfCleverPoint extends PaymentModule
             $AFCP_ADDRESS_BAR = Configuration::get('AFCP_ADDRESS_BAR');
             $AFCP_POINT_LIST = Configuration::get('AFCP_POINT_LIST');
 
-            // Clever point carriers
+            // CleverPoint default carriers
+            $AFCP_DEFAULT_CARRIER = Configuration::get('AFCP_DEFAULT_CARRIER');
             $afcp_carriers = unserialize(Configuration::get('AFCP_CARRIER_IDS'));
+            if (empty($AFCP_DEFAULT_CARRIER)) {
+                $afcp_default_cp_carrier = $afcp_carriers[0];
+            } else {
+                $afcp_default_cp_carrier = Db::getInstance()->getValue(
+                    'SELECT `id_carrier` FROM `' . _DB_PREFIX_ . 'carrier`
+			            WHERE id_reference = ' . (int) $AFCP_DEFAULT_CARRIER . ' AND deleted = 0 ORDER BY id_carrier DESC'
+                );
+            }
+
             Media::addJsDef(
                 array(
                     'afcp_ajax_url' => $this->context->link->getModuleLink($this->name, 'ajax', array(), null),
@@ -314,9 +352,9 @@ class AfCleverPoint extends PaymentModule
                     'afcp_carriers' => $afcp_carriers,
                     // Which carriers are assigned to Clever Point?
                     'afcp_costtocust' => Configuration::get('AFCP_COSTTOCUST'),
-                    'afcp_default_cp_carrier' => (isset($afcp_carriers[0]) ? $afcp_carriers[0] : 0),
-                    'afcp_checkout_btn_selector' => 'form#js-delivery button[name="confirmDeliveryOption"]',
-                    // @ToDo make it compatible with onepage checkout
+                    'afcp_default_cp_carrier' => $afcp_default_cp_carrier,
+                    'afcp_checkout_btn_selector' => $afcp_checkout_btn_selector,
+                    'afcp_opc_enabled' => $afcp_opc_enabled
                 )
             );
         }
@@ -362,11 +400,13 @@ class AfCleverPoint extends PaymentModule
             }
         }
 
+        $afcp_module_url = Context::getContext()->link->getMediaLink(
+            __PS_BASE_URI__.'modules/'.$this->name
+        );
+
         $this->context->smarty->assign(
             'afcp_module_url',
-            Context::getContext()->link->getMediaLink(
-                __PS_BASE_URI__.'modules/'.$this->name
-            )
+            $afcp_module_url
         );
 
         $html_confirmation_messages = $this->display($this->_path, 'getContent.tpl');
@@ -375,12 +415,17 @@ class AfCleverPoint extends PaymentModule
             [
                 'ps_carriers' => $ps_carriers,
                 'cp_carriers' => $this->getCleverPointCarriers(),
-                'carrier_mapping' => AfCleverPoint::jsonDecode(
+                'carrier_mapping' => Tools::jsonDecode(
                     Configuration::get(
                         'AFCP_CARRIER_MAPPING'
                     ),
                     true
                 ),
+                'afcp_module_url' => $afcp_module_url,
+                // Check if thecheckout module is enabled
+                'opc_is_enabled' => $this->tcIsModuleEnabled(),
+                // Module thecheckout compatibility
+                'opc_compatibility' => $this->tcVersionCompatibility()
             ]
         );
 
@@ -481,6 +526,7 @@ class AfCleverPoint extends PaymentModule
             ['id_option' => 'popup', 'name' => $this->l('Modal')],
             ['id_option' => 'embed', 'name' => $this->l('Embed')],
         ];
+
         $info_type_options = [
             ['id_option' => 'docked', 'name' => $this->l('Docked')],
             ['id_option' => 'floating', 'name' => $this->l('Floating')],
@@ -508,6 +554,23 @@ class AfCleverPoint extends PaymentModule
             null,
             Carrier::ALL_CARRIERS
         );
+
+        $cp_carriers = [];
+        if (!empty($fields_values['AFCP_CARRIER_IDS'])) {
+            if (!empty($carriers)) {
+                foreach ($carriers as $carrier) {
+                    if (in_array($carrier['id_carrier'], $fields_values['AFCP_CARRIER_IDS'])) {
+                        $cp_carriers[] = $carrier;
+                    }
+                }
+            }
+        }
+
+        if (empty($cp_carriers)) {
+            $cp_carriers = [
+                ['id_reference' => 0, 'name' => $this->l('-- Select --')]
+            ];
+        }
 
         // Get available order states
         $order_states = array_merge([['id_order_state' => 0, 'name' => $this->l('-- Select --')]],
@@ -761,6 +824,19 @@ class AfCleverPoint extends PaymentModule
                                 ),
                                 array(
                                     'type' => 'select',
+                                    'label' => $this->l('Default carrier'),
+                                    'name' => 'AFCP_DEFAULT_CARRIER',
+                                    'desc' => $this->l('Select the default carrier that will be selected when a customer selects CleverPoint pickup. If no option displayed select Clever Point carriers from the option above and press Save.'),
+                                    'required' => true,
+                                    'multiple' => false,
+                                    'options' => array(
+                                        'query' => $cp_carriers,
+                                        'id' => 'id_reference',
+                                        'name' => 'name',
+                                    ),
+                                ),
+                                array(
+                                    'type' => 'select',
                                     'label' => $this->l('Initial order status'),
                                     'name' => 'AFCP_CLEVERPOINT_OS',
                                     'desc' => $this->l('Initial status when an order is placed with COD.'),
@@ -777,7 +853,7 @@ class AfCleverPoint extends PaymentModule
                                 'title' => $this->l('Save'),
                             ),
                         ),
-                ),
+                )
             );
     }
 
@@ -963,6 +1039,11 @@ class AfCleverPoint extends PaymentModule
                     'type' => 'select',
                     'default' => array(),
                 ),
+            'AFCP_DEFAULT_CARRIER' =>
+                array(
+                    'type' => 'select',
+                    'default' => null,
+                ),
             'AFCP_DISPLAY_METHOD' =>
                 array(
                     'type' => 'select',
@@ -1039,7 +1120,7 @@ class AfCleverPoint extends PaymentModule
                 array(
                     'type' => 'select',
                     'default' => '',
-                ),
+                )
         );
     }
 
@@ -1562,6 +1643,10 @@ class AfCleverPoint extends PaymentModule
             'Carriers saved successfully' => $this->l('Carriers saved successfully'),
             'Categories saved successfully.' => $this->l('Categories saved successfully.'),
             'Cash on delivery' => $this->l('Cash on delivery'),
+            'Carriers refresh success' => $this->l('Carriers refresh success'),
+            'Found no Clever Point carriers' => $this->l('Found no Clever Point carriers'),
+            'Script installed successfully' => $this->l('Script installed successfully'),
+
         );
 
         return (isset($messages[$id]) ? $messages[$id] : $id);
@@ -2108,20 +2193,24 @@ class AfCleverPoint extends PaymentModule
     }
 
     /**
-     * Get
-     * @return void
+     * Get Clever Point carriers list
+     *
+     * @boolean $force_refresh
+     * @return array
      */
-    public function getCleverPointCarriers()
+    public function getCleverPointCarriers($force_refresh = false)
     {
         // Check if local json file exists
         $json_file = _PS_MODULE_DIR_.$this->name.'/data/carriers.json';
 
         $carriers = [];
 
-        if (file_exists($json_file)) {
-            // Check if file is not older that 2 hours
-            if (time() - filemtime($json_file) <= 2 * 3600) {
-                $carriers = json_decode(file_get_contents($json_file), true);
+        if (!$force_refresh) {
+            if (file_exists($json_file)) {
+                // Check if file is not older than 2 hours
+                if (time() - filemtime($json_file) <= 2 * 3600) {
+                    $carriers = json_decode(file_get_contents($json_file), true);
+                }
             }
         }
 
@@ -2305,7 +2394,7 @@ class AfCleverPoint extends PaymentModule
         $sql = "SELECT `id_reference` FROM `"._DB_PREFIX_."carrier` WHERE `id_carrier` = ".$id_carrier;
         $id_reference = Db::getInstance()->getValue($sql);
 
-        $AFCP_CARRIER_MAPPING = AfCleverPoint::jsonDecode(Configuration::get('AFCP_CARRIER_MAPPING'), true);
+        $AFCP_CARRIER_MAPPING = Tools::jsonDecode(Configuration::get('AFCP_CARRIER_MAPPING'), true);
         if (!empty($AFCP_CARRIER_MAPPING) && !empty($id_reference)) {
             $carrierId = $AFCP_CARRIER_MAPPING[$id_reference];
 
@@ -2705,8 +2794,10 @@ class AfCleverPoint extends PaymentModule
         try {
             $io = new CleverPoint\Override\InstallOverride($this);
             $io->processOverride('addOverride');
+
             return true;
         } catch (Exception $e) {
+            $this->_errors[] = $e->getMessage();
             return false;
         }
     }
@@ -2721,45 +2812,88 @@ class AfCleverPoint extends PaymentModule
         try {
             $io = new CleverPoint\Override\InstallOverride($this);
             $io->processOverride('removeOverride');
+
             return true;
         } catch (Exception $e) {
+            $this->_errors[] = $e->getMessage();
             return false;
         }
     }
 
+    ## BEGIN thecheckout module functions
     /**
-     * jsonDecode convert json string to php array / object
+     * Check if thecheckout module is enabled.
      *
-     * @param $data
-     * @param $assoc
-     * @param $depth
-     * @param $options
-     * @return array
+     * @link https://addons.prestashop.com/en/express-checkout-process/6841-one-page-checkout-for-prestashop.html
+     * @return boolean
      */
-    public static function jsonDecode($data, $assoc = false, $depth = 512, $options = 0)
+    public function tcIsModuleEnabled()
     {
-        if (method_exists('Tools', 'jsonDecode')) {
-            return Tools::jsonDecode($data, $assoc, $depth, $options);
-        } else {
-            return json_decode($data, $assoc, $depth, $options);
+        if (Module::isEnabled('thecheckout')) {
+            if (!Configuration::get('TC_test_mode')) {
+                return true;
+            }
         }
+
+        return false;
     }
 
     /**
-     * Convert an array to json string
+     * Get thecheckout versions that are compatible with CleverPoint module
      *
-     * @param array $data
-     * @param int $depth
-     * @param int $options
-     *
-     * @return string json
+     * @return array
      */
-    public static function jsonEncode($data, $options = 0, $depth = 512)
+    public function tcVersionCompatibility()
     {
-        if (method_exists('Tools', 'jsonEncode')) {
-            return Tools::jsonEncode($data, $options, $depth);
+        $compatibility =
+            [
+                'min' => '3.3.4',
+                'max' => '3.3.8'
+            ];
+
+        return $compatibility;
+    }
+
+    /**
+     * Get thecheckout installed version
+     *
+     * @return array
+     */
+    public function tcVersion()
+    {
+        $version = Db::getInstance()->getValue("SELECT `version` FROM `"._DB_PREFIX_."module` WHERE `name` = 'thecheckout'");
+
+        return $version;
+    }
+
+    /**
+     * Load thecheckout assets
+     * @return void
+     */
+    public function tcLoadAssetsFront()
+    {
+        $this->context->controller->registerStylesheet(
+            $this->name.'-css',
+            'modules/'.$this->name.'/views/css/front_opc.css',
+            ['priority' => 150]
+        );
+
+        // Load javascript
+        $opc_version = $this->tcVersion(); // module's version
+        // Check if exists js for installed version e.g. /views/js/opc/opc-v3.3.8.js
+        if (file_exists(_PS_MODULE_DIR_."/".$this->name."/views/js/opc/opc-v$opc_version.js")) {
+            $this->context->controller->registerJavascript(
+                $this->name.'-js',
+                'modules/'.$this->name."/views/js/opc/opc-v$opc_version.js",
+                ['priority' => 150, 'version' => $this->version]
+            );
         } else {
-            return json_encode($data, $options, $depth);
+            $this->context->controller->registerJavascript(
+                $this->name.'-js',
+                'modules/'.$this->name."/views/js/opc/opc.js",
+                ['priority' => 150, 'version' => $this->version]
+            );
         }
     }
+    ## END thecheckout module functions
 }

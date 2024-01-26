@@ -39,6 +39,12 @@ function afcpAjaxComplete(action = '', data = []) {
     if (action === 'createVoucher' || action === 'cancelVoucher') {
         window.location.reload();
     }
+
+    if (action == 'refreshCleverPointCarriers') {
+        if (data.status == 'success') {
+            window.location.reload();
+        }
+    }
 }
 
 /**

@@ -52,11 +52,11 @@ class AdminAfCleverPointController extends ModuleAdminController
 
         $this->_join = "
 		INNER JOIN `"._DB_PREFIX_.AfCleverPointDeliveryRequest::$definition['table']."` AS afcp ON (afcp.`".AfCleverPointDeliveryRequest::$definition['primary']."` = a.`id_order`)
-		LEFT JOIN `" . _DB_PREFIX_ . "customer` c ON (c.`id_customer` = a.`id_customer`)
-		LEFT JOIN `" . _DB_PREFIX_ . "order_state` os ON (os.`id_order_state` = a.`current_state`)
-		LEFT JOIN `" . _DB_PREFIX_ . "order_state_lang` osl ON (os.`id_order_state` = osl.`id_order_state` AND osl.`id_lang` = " . (int) $this->context->language->id . ")";
+		LEFT JOIN `"._DB_PREFIX_."customer` c ON (c.`id_customer` = a.`id_customer`)
+		LEFT JOIN `"._DB_PREFIX_."order_state` os ON (os.`id_order_state` = a.`current_state`)
+		LEFT JOIN `"._DB_PREFIX_."order_state_lang` osl ON (os.`id_order_state` = osl.`id_order_state` AND osl.`id_lang` = ".(int)$this->context->language->id.")";
 
-        $statuses = OrderState::getOrderStates((int) $this->context->language->id);
+        $statuses = OrderState::getOrderStates((int)$this->context->language->id);
         foreach ($statuses as $status) {
             $this->statuses_array[$status['id_order_state']] = $status['name'];
         }
@@ -105,10 +105,10 @@ class AdminAfCleverPointController extends ModuleAdminController
     public static function setOrderCurrency($echo, $tr)
     {
         if (!empty($tr['id_currency'])) {
-            $idCurrency = (int) $tr['id_currency'];
+            $idCurrency = (int)$tr['id_currency'];
         } else {
             $order = new Order($tr['id_order']);
-            $idCurrency = (int) $order->id_currency;
+            $idCurrency = (int)$order->id_currency;
         }
 
         return Tools::displayPrice($echo, $idCurrency);
@@ -168,11 +168,7 @@ class AdminAfCleverPointController extends ModuleAdminController
     public function ajaxProcessAfCleverPointAdmin()
     {
         $this->setAjaxReponseVar('status', 'warning');
-        $this->setAjaxReponseVar(
-            'message',
-            $this->module->translate('Invalid request.')
-        );
-
+        $this->setAjaxReponseVar('message', '');
         $this->setAjaxReponseVar('html', '');
 
         $hash = Tools::getValue('hash');
@@ -199,6 +195,11 @@ class AdminAfCleverPointController extends ModuleAdminController
                     $e->getMessage();
             }
 
+        } else {
+            $this->setAjaxReponseVar(
+                'message',
+                $this->module->translate('Invalid request.')
+            );
         }
 
         if (empty($this->_ajax_errors)) {
@@ -246,12 +247,14 @@ class AdminAfCleverPointController extends ModuleAdminController
                     if (empty($cp_delivery_request->ExternalCarrierId)) {
                         $this->_ajax_errors[] =
                             $this->module->translate('Please select courier.');
+
                         return false;
                     }
 
                     if (empty($cp_delivery_request->ShipmentAwb)) {
                         $this->_ajax_errors[] =
                             $this->module->translate('Please enter ShipmentAwb.');
+
                         return false;
                     }
 
@@ -401,9 +404,16 @@ class AdminAfCleverPointController extends ModuleAdminController
         $data = array();
         parse_str(Tools::getValue('data'), $data);
 
-        // Check delivery request first
-        if (isset($data['id_cleverpoint_delivery_request']) && !empty($data['id_cleverpoint_delivery_request'])) {
-            if (isset($data['afcp_id_order']) && !empty($data['afcp_id_order'])) {
+        $id_order = (isset($data['afcp_id_order']) && !empty($data['afcp_id_order']) ? (int)$data['afcp_id_order'] : 0);
+
+        if (empty($id_order)) {
+            return false;
+        }
+
+        // Check if it is CleverPoint order
+        if ($this->module->isCleverPointOrder(null, $id_order)) {
+            // Check delivery request first
+            if (isset($data['id_cleverpoint_delivery_request']) && !empty($data['id_cleverpoint_delivery_request'])) {
                 $cp_delivery_request = new AfCleverPointDeliveryRequest((int)$data['id_cleverpoint_delivery_request']);
                 if ($cp_delivery_request->id_order == (int)$data['afcp_id_order']) {
 
@@ -432,10 +442,8 @@ class AdminAfCleverPointController extends ModuleAdminController
                     );
                 }
             } else {
-                $this->_ajax_errors[] = $this->module->translate('Invalid order.');
+                $this->_ajax_errors[] = $this->module->translate('Invalid delivery request.');
             }
-        } else {
-            $this->_ajax_errors[] = $this->module->translate('Invalid delivery request.');
         }
 
         return true;
@@ -446,7 +454,8 @@ class AdminAfCleverPointController extends ModuleAdminController
      *
      * @return true
      */
-    public function saveCleverPointCarriers()
+    public
+    function saveCleverPointCarriers()
     {
         $data = array();
         parse_str(Tools::getValue('data'), $data);
@@ -455,14 +464,14 @@ class AdminAfCleverPointController extends ModuleAdminController
             if (
                 Configuration::updateValue(
                     'AFCP_CARRIER_MAPPING',
-                    AfCleverPoint::jsonEncode($data['carrier'])
+                    Tools::jsonEncode($data['carrier'])
                 )
             ) {
 
                 $this->setAjaxReponseVar('status', 'success');
                 $this->setAjaxReponseVar(
                     'message',
-                    $this->module->translate('Carriers saved successfully.')
+                    $this->module->translate('Carriers saved successfully')
                 );
 
             } else {
@@ -480,6 +489,28 @@ class AdminAfCleverPointController extends ModuleAdminController
                 $this->module->translate('Invalid data.')
             );
 
+        }
+
+        return true;
+    }
+
+    /**
+     * Refresh Clever Point carrier list
+     * @return true
+     */
+    public
+    function refreshCleverPointCarriers()
+    {
+        $carriers = $this->module->getCleverPointCarriers(true);
+
+        if (!empty($carriers)) {
+            $this->setAjaxReponseVar(
+                'message',
+                $this->module->translate('Carriers refresh success.')
+            );
+        } else {
+            $this->_ajax_errors[] =
+                $this->module->translate('Found no Clever Point carriers.');
         }
 
         return true;

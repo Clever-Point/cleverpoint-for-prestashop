@@ -10,54 +10,32 @@
 
 $(document).ready(function () {
 
-    afCleverPointHideOrDisplayWrap(false);
-
     $(document).on('click', '#afcp_pickup_from_cleverpoint', function () {
         afCleverPointHideOrDisplayWrap();
     });
 
-    clevermap({
-        selector: '#clevermap',
-        cleverPointKey: afcp_cleverpoint_api_key,
-        arcgisMapKey: afcp_arcgis_api_key,       // 'YOUR ARCGIS API KEY'
-        googleMapKey: afcp_googlemaps_api_key,       // 'YOUR GOOGLE MAP KEY'
-        header: afcp_header,
-        defaultAddress: afcp_address_delivery,
-        defaultCoordinates: null,
-        defaultCleverPoint: false,
-        singleSelect: afcp_single_select,
-        display: {
-            addressBar: afcp_address_bar,
-            pointList: afcp_point_list,
-            pointInfoType: afcp_info_type
-        },
-        filters: {
-            codAmount: 0
-        },
-        onclear: () => {
-            afcpClearCartPoint();
-        },
-        onselect: (point) => {
-            afcpSaveCartPoint(point);
-        },
-        oninitialized: () => {
-        }
-    });
+    // Initialize clevermap
+    if (!afcp_opc_enabled) {
 
-    // Comfirm btn listener
-    if (afcp_checkout_btn_selector != '') {
-        //@ToDo save to Cookie vars
-        $(document).on('click', afcp_checkout_btn_selector, function (e) {
-            if ($('#afcp_pickup_from_cleverpoint').is(':checked')) {
-                if ($('#af-cleverpoint-selected-point').val() == '') {
-                    alert(afcp_text_select_point);
-                    return false;
-                } else {
-                    return true;
+        afCleverPointHideOrDisplayWrap(false);
+
+        afCleverPointInitializeMap();
+
+        // Comfirm btn listener
+        if (afcp_checkout_btn_selector != '') {
+            //@ToDo save to Cookie vars
+            $(document).on('click', afcp_checkout_btn_selector, function (e) {
+                if ($('#afcp_pickup_from_cleverpoint').is(':checked')) {
+                    if ($('#af-cleverpoint-selected-point').val() == '') {
+                        alert(afcp_text_select_point);
+                        return false;
+                    } else {
+                        return true;
+                    }
                 }
-            }
-            return true;
-        });
+                return true;
+            });
+        }
     }
 });
 
@@ -290,9 +268,16 @@ function afCleverPointRefreshCarrierList() {
         });
 
         // Check if there is any delivery option checked else click default
-        // @ToDo create a configuration option to define which courier will be default one
-        var selected_carrier = $("div.delivery-options input[type='radio']").val().replace(",", "");
-        if (parseInt(selected_carrier) > 0 && afcp_default_cp_carrier > 0) {
+        var selected_carrier = afGetSelectedCarrier();
+        var selected_carrier_value = afGetSelectedCarrierId(selected_carrier);
+
+        if (
+            parseInt(selected_carrier_value) > 0 &&
+            afcp_default_cp_carrier > 0 &&
+            selected_carrier.is(':disabled') &&
+            !afcp_carriers.includes(selected_carrier)
+        ) {
+            // Click on default carrier that supports pickup from CleverPoint
             $("div.delivery-options #delivery_option_" + afcp_default_cp_carrier).click();
         }
     } else {
@@ -301,8 +286,6 @@ function afCleverPointRefreshCarrierList() {
             $(element).removeAttr('disabled');
         });
     }
-
-
 }
 
 /**
@@ -321,11 +304,17 @@ function afCleverPointRefreshTotals(result) {
             if (typeof (result.data.cp_delivery_request) != 'undefined') {
                 var cp_delivery_request = result.data.cp_delivery_request;
             }
-            var deliver_order_with_cp = (cp_delivery_request.deliver_order_with_cp === 1);
-
+            var deliver_order_with_cp = 0;
+            if (typeof (cp_delivery_request) != 'undefined') {
+                deliver_order_with_cp = (cp_delivery_request.deliver_order_with_cp === 1);
+            }
             if (deliver_order_with_cp) {
-                if (typeof (result.data.service_cost_summary_html) != 'undefined' && $('#cart-subtotal-clever-point').length == '') {
-                    $('section#js-checkout-summary div.cart-summary-subtotals-container').append(result.data.service_cost_summary_html);
+                if (typeof (result.data.service_cost_summary_html) != 'undefined' && $('#cart-subtotal-clever-point').length == 0) {
+                    if (afcp_opc_enabled) {
+                        $('div.cart-summary #cart-subtotal-shipping').after(result.data.service_cost_summary_html);
+                    } else {
+                        $('section#js-checkout-summary div.cart-summary-subtotals-container').append(result.data.service_cost_summary_html);
+                    }
                 }
                 $('#af-cleverpoint-costs').html(result.data.service_cost_html);
                 if (has_checkout_summary) {
@@ -339,7 +328,11 @@ function afCleverPointRefreshTotals(result) {
             }
             // Update cart total
             if (typeof (result.data.cart_total_with_service_formatted) != 'undefined') {
-                $('section#js-checkout-summary div.cart-summary-totals .cart-total span.value').html(result.data.cart_total_with_service_formatted);
+                if (afcp_opc_enabled) {
+                    $('div.cart-summary div.cart-total span.value').html(result.data.cart_total_with_service_formatted);
+                } else {
+                    $('section#js-checkout-summary div.cart-summary-totals .cart-total span.value').html(result.data.cart_total_with_service_formatted);
+                }
             }
         }
     }
@@ -352,7 +345,6 @@ function afCleverPointRefreshTotals(result) {
  * @param message
  */
 function afcpAjaxDisplayMessagesCheckout(type, message) {
-
     var _html_message = '';
     if (typeof message === 'object') {
         $.each(message, function (key, value) {
@@ -378,3 +370,68 @@ $( document ).on( "ajaxComplete", function( event, xhr, settings ) {
         }
     }
 } );
+
+/**
+ * Function to initialize CleverMap
+ */
+function afCleverPointInitializeMap()
+{
+    if ($('#af-cleverpoint-initialize-map').val() != 1) {
+        clevermap({
+            selector: '#clevermap',
+            cleverPointKey: afcp_cleverpoint_api_key,
+            arcgisMapKey: afcp_arcgis_api_key,       // 'YOUR ARCGIS API KEY'
+            googleMapKey: afcp_googlemaps_api_key,       // 'YOUR GOOGLE MAP KEY'
+            header: afcp_header,
+            defaultAddress: afcp_address_delivery,
+            defaultCoordinates: null,
+            defaultCleverPoint: false,
+            singleSelect: afcp_single_select,
+            display: {
+                addressBar: afcp_address_bar,
+                pointList: afcp_point_list,
+                pointInfoType: afcp_info_type
+            },
+            filters: {
+                codAmount: 0
+            },
+            onclear: () => {
+                afcpClearCartPoint();
+            },
+            onselect: (point) => {
+                afcpSaveCartPoint(point);
+            },
+            oninitialized: () => {
+            }
+        });
+
+        // Set hidden value when map is initialized
+        $('#af-cleverpoint-initialize-map').val(1);
+    }
+}
+
+/**
+ * Get selected carrier element
+ * @return object
+ */
+function afGetSelectedCarrier()
+{
+    var selected_carrier = '';
+
+    if (!afcp_opc_enabled) {
+        selected_carrier = $("div.delivery-options input[type='radio']");
+    } else {
+        selected_carrier = $("div.delivery-options div.delivery-option-row.active input[type='radio']");
+    }
+
+    return selected_carrier;
+}
+
+/**
+ * Get selected carrier element
+ * @return int
+ */
+function afGetSelectedCarrierId(selected_carrier)
+{
+    return parseInt(selected_carrier.val().replace(",", ""));
+}

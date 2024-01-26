@@ -13,10 +13,17 @@ $(document).ready(function (e) {
         e.preventDefault();
         afcpAdminOrderAjaxCall($(this).data('action'), $('#clever_point_order_admin_form').serialize());
     });
+
     $(document).on('click', '#admin-clever-point-save-carriers', function (e) {
         e.preventDefault();
         afcpAdminOrderAjaxCall('saveCleverPointCarriers', $('#af_cleverpoint_carrier_form').serialize());
     });
+
+    $(document).on('click', '#admin-clever-point-refresh-carriers', function (e) {
+        e.preventDefault();
+        afcpAdminOrderAjaxCall('refreshCleverPointCarriers', $('#af_cleverpoint_carrier_form').serialize());
+    });
+
     $(document).on('click', '#admin-clever-point-save-categories', function (e) {
         e.preventDefault();
         afcpAdminOrderAjaxCall('saveCleverPointCategories', $('#af_cleverpoint_carrier_form_categories').serialize());
